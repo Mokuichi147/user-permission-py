@@ -1,4 +1,4 @@
-# UserPermission (Python bindings)
+# user-permission-py
 
 ![PyPI - License](https://img.shields.io/pypi/l/user-permission?cacheSeconds=0)
 ![PyPI - Version](https://img.shields.io/pypi/v/user-permission?cacheSeconds=0)

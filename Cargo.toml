@@ -10,8 +10,8 @@ edition = "2021"
 rust-version = "1.75"
 license = "MIT OR Apache-2.0"
 authors = ["mokuichi147 <38586357+Mokuichi147@users.noreply.github.com>"]
-repository = "https://github.com/mokuichi147/UserPermission"
-homepage = "https://github.com/mokuichi147/UserPermission"
+repository = "https://github.com/mokuichi147/user-permission-py"
+homepage = "https://github.com/mokuichi147/user-permission-py"
 
 [workspace.dependencies]
 # Rust 実装は別リポジトリ (mokuichi147/user-permission) に分離済み。crates.io から取得する。
