@@ -2631,9 +2631,9 @@ dependencies = [
 
 [[package]]
 name = "user-permission"
-version = "0.1.1"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d2c7f8562eff44f9d102ad5a042f02e4d43d50b98ea887277e78bd5a8caa317"
+checksum = "3063fdc43f49a79b08e71b8f02076af4ae38eb6176813a62f14f4732df1a139e"
 dependencies = [
  "anyhow",
  "askama",
@@ -2654,9 +2654,9 @@ dependencies = [
 
 [[package]]
 name = "user-permission-core"
-version = "0.1.1"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e67517b7f935eb470656ca5ac3c9d01c065e688108d9e1e37fbaaddd5af46c5c"
+checksum = "a39f073e7049b3c995304f40fffc56a43e4cc099e69bd50304ce224b68c43c6d"
 dependencies = [
  "argon2",
  "async-trait",
@@ -2675,7 +2675,7 @@ dependencies = [
 
 [[package]]
 name = "user-permission-python"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "axum",
  "chrono",

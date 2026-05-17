@@ -78,49 +78,39 @@ fn pydelta_to_duration(delta: Option<&Bound<'_, PyAny>>) -> PyResult<Duration> {
 
 #[pymethods]
 impl PyUserManager {
-    #[pyo3(signature = (username, password, display_name=""))]
+    #[pyo3(signature = (username, password, display_name="", *, token=None))]
     fn create<'py>(
         &self,
         py: Python<'py>,
         username: String,
         password: String,
         display_name: &str,
+        token: Option<String>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let db = get_db(&self.db)?;
         let display_name = display_name.to_string();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let user = db
                 .users()
-                .create(&username, &password, &display_name)
+                .create(&username, &password, &display_name, token.as_deref())
                 .await
                 .map_err(map_core_err)?;
             Python::with_gil(|py| Ok(PyUser::from(user).into_py(py)))
         })
     }
 
-    fn get_by_id<'py>(&self, py: Python<'py>, user_id: i64) -> PyResult<Bound<'py, PyAny>> {
-        let db = get_db(&self.db)?;
-        pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let user = db.users().get_by_id(user_id).await.map_err(map_core_err)?;
-            Python::with_gil(|py| {
-                Ok(match user {
-                    Some(u) => PyUser::from(u).into_py(py),
-                    None => py.None(),
-                })
-            })
-        })
-    }
-
-    fn get_by_username<'py>(
+    #[pyo3(signature = (user_id, *, token=None))]
+    fn get_by_id<'py>(
         &self,
         py: Python<'py>,
-        username: String,
+        user_id: i64,
+        token: Option<String>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let db = get_db(&self.db)?;
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let user = db
                 .users()
-                .get_by_username(&username)
+                .get_by_id(user_id, token.as_deref())
                 .await
                 .map_err(map_core_err)?;
             Python::with_gil(|py| {
@@ -132,10 +122,42 @@ impl PyUserManager {
         })
     }
 
-    fn list_all<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    #[pyo3(signature = (username, *, token=None))]
+    fn get_by_username<'py>(
+        &self,
+        py: Python<'py>,
+        username: String,
+        token: Option<String>,
+    ) -> PyResult<Bound<'py, PyAny>> {
         let db = get_db(&self.db)?;
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let users = db.users().list_all().await.map_err(map_core_err)?;
+            let user = db
+                .users()
+                .get_by_username(&username, token.as_deref())
+                .await
+                .map_err(map_core_err)?;
+            Python::with_gil(|py| {
+                Ok(match user {
+                    Some(u) => PyUser::from(u).into_py(py),
+                    None => py.None(),
+                })
+            })
+        })
+    }
+
+    #[pyo3(signature = (*, token=None))]
+    fn list_all<'py>(
+        &self,
+        py: Python<'py>,
+        token: Option<String>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let db = get_db(&self.db)?;
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let users = db
+                .users()
+                .list_all(token.as_deref())
+                .await
+                .map_err(map_core_err)?;
             Python::with_gil(|py| {
                 Ok(users
                     .into_iter()
@@ -146,7 +168,7 @@ impl PyUserManager {
         })
     }
 
-    #[pyo3(signature = (user_id, *, username=None, password=None, display_name=None, is_active=None))]
+    #[pyo3(signature = (user_id, *, username=None, password=None, display_name=None, is_active=None, token=None))]
     fn update<'py>(
         &self,
         py: Python<'py>,
@@ -155,6 +177,7 @@ impl PyUserManager {
         password: Option<String>,
         display_name: Option<String>,
         is_active: Option<bool>,
+        token: Option<String>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let db = get_db(&self.db)?;
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
@@ -168,6 +191,7 @@ impl PyUserManager {
                         display_name,
                         is_active,
                     },
+                    token.as_deref(),
                 )
                 .await
                 .map_err(map_core_err)?;
@@ -180,30 +204,50 @@ impl PyUserManager {
         })
     }
 
-    fn delete<'py>(&self, py: Python<'py>, user_id: i64) -> PyResult<Bound<'py, PyAny>> {
+    #[pyo3(signature = (user_id, *, token=None))]
+    fn delete<'py>(
+        &self,
+        py: Python<'py>,
+        user_id: i64,
+        token: Option<String>,
+    ) -> PyResult<Bound<'py, PyAny>> {
         let db = get_db(&self.db)?;
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            db.users().delete(user_id).await.map_err(map_core_err)
+            db.users()
+                .delete(user_id, token.as_deref())
+                .await
+                .map_err(map_core_err)
         })
     }
 
-    fn is_admin<'py>(&self, py: Python<'py>, user_id: i64) -> PyResult<Bound<'py, PyAny>> {
+    #[pyo3(signature = (user_id, *, token=None))]
+    fn is_admin<'py>(
+        &self,
+        py: Python<'py>,
+        user_id: i64,
+        token: Option<String>,
+    ) -> PyResult<Bound<'py, PyAny>> {
         let db = get_db(&self.db)?;
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            db.users().is_admin(user_id).await.map_err(map_core_err)
+            db.users()
+                .is_admin(user_id, token.as_deref())
+                .await
+                .map_err(map_core_err)
         })
     }
 
+    #[pyo3(signature = (user_id, is_admin, *, token=None))]
     fn set_admin<'py>(
         &self,
         py: Python<'py>,
         user_id: i64,
         is_admin: bool,
+        token: Option<String>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let db = get_db(&self.db)?;
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             db.users()
-                .set_admin(user_id, is_admin)
+                .set_admin(user_id, is_admin, token.as_deref())
                 .await
                 .map_err(map_core_err)
         })
