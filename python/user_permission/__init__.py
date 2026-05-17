@@ -52,18 +52,25 @@ class UserManager:
         self._inner = inner
 
     async def create(
-        self, username: str, password: str, display_name: str = ""
+        self,
+        username: str,
+        password: str,
+        display_name: str = "",
+        *,
+        token: str | None = None,
     ) -> User:
-        return await self._inner.create(username, password, display_name)
+        return await self._inner.create(username, password, display_name, token=token)
 
-    async def get_by_id(self, user_id: int) -> User | None:
-        return await self._inner.get_by_id(user_id)
+    async def get_by_id(self, user_id: int, *, token: str | None = None) -> User | None:
+        return await self._inner.get_by_id(user_id, token=token)
 
-    async def get_by_username(self, username: str) -> User | None:
-        return await self._inner.get_by_username(username)
+    async def get_by_username(
+        self, username: str, *, token: str | None = None
+    ) -> User | None:
+        return await self._inner.get_by_username(username, token=token)
 
-    async def list_all(self) -> list[User]:
-        return await self._inner.list_all()
+    async def list_all(self, *, token: str | None = None) -> list[User]:
+        return await self._inner.list_all(token=token)
 
     async def update(
         self,
@@ -73,6 +80,7 @@ class UserManager:
         password: str | None = None,
         display_name: str | None = None,
         is_active: bool | None = None,
+        token: str | None = None,
     ) -> User | None:
         return await self._inner.update(
             user_id,
@@ -80,16 +88,19 @@ class UserManager:
             password=password,
             display_name=display_name,
             is_active=is_active,
+            token=token,
         )
 
-    async def delete(self, user_id: int) -> bool:
-        return await self._inner.delete(user_id)
+    async def delete(self, user_id: int, *, token: str | None = None) -> bool:
+        return await self._inner.delete(user_id, token=token)
 
-    async def is_admin(self, user_id: int) -> bool:
-        return await self._inner.is_admin(user_id)
+    async def is_admin(self, user_id: int, *, token: str | None = None) -> bool:
+        return await self._inner.is_admin(user_id, token=token)
 
-    async def set_admin(self, user_id: int, is_admin: bool) -> bool:
-        return await self._inner.set_admin(user_id, is_admin)
+    async def set_admin(
+        self, user_id: int, is_admin: bool, *, token: str | None = None
+    ) -> bool:
+        return await self._inner.set_admin(user_id, is_admin, token=token)
 
     async def authenticate(
         self,
@@ -116,20 +127,25 @@ class GroupManager:
         description: str = "",
         *,
         is_admin: bool = False,
+        token: str | None = None,
     ) -> Group:
-        return await self._inner.create(name, description, is_admin=is_admin)
+        return await self._inner.create(
+            name, description, is_admin=is_admin, token=token
+        )
 
-    async def get_by_id(self, group_id: int) -> Group | None:
-        return await self._inner.get_by_id(group_id)
+    async def get_by_id(
+        self, group_id: int, *, token: str | None = None
+    ) -> Group | None:
+        return await self._inner.get_by_id(group_id, token=token)
 
-    async def get_by_name(self, name: str) -> Group | None:
-        return await self._inner.get_by_name(name)
+    async def get_by_name(self, name: str, *, token: str | None = None) -> Group | None:
+        return await self._inner.get_by_name(name, token=token)
 
-    async def list_all(self) -> list[Group]:
-        return await self._inner.list_all()
+    async def list_all(self, *, token: str | None = None) -> list[Group]:
+        return await self._inner.list_all(token=token)
 
-    async def list_admin_groups(self) -> list[Group]:
-        return await self._inner.list_admin_groups()
+    async def list_admin_groups(self, *, token: str | None = None) -> list[Group]:
+        return await self._inner.list_admin_groups(token=token)
 
     async def update(
         self,
@@ -138,28 +154,38 @@ class GroupManager:
         name: str | None = None,
         description: str | None = None,
         is_admin: bool | None = None,
+        token: str | None = None,
     ) -> Group | None:
         return await self._inner.update(
             group_id,
             name=name,
             description=description,
             is_admin=is_admin,
+            token=token,
         )
 
-    async def delete(self, group_id: int) -> bool:
-        return await self._inner.delete(group_id)
+    async def delete(self, group_id: int, *, token: str | None = None) -> bool:
+        return await self._inner.delete(group_id, token=token)
 
-    async def add_user(self, group_id: int, user_id: int) -> bool:
-        return await self._inner.add_user(group_id, user_id)
+    async def add_user(
+        self, group_id: int, user_id: int, *, token: str | None = None
+    ) -> bool:
+        return await self._inner.add_user(group_id, user_id, token=token)
 
-    async def remove_user(self, group_id: int, user_id: int) -> bool:
-        return await self._inner.remove_user(group_id, user_id)
+    async def remove_user(
+        self, group_id: int, user_id: int, *, token: str | None = None
+    ) -> bool:
+        return await self._inner.remove_user(group_id, user_id, token=token)
 
-    async def get_members(self, group_id: int) -> list[User]:
-        return await self._inner.get_members(group_id)
+    async def get_members(
+        self, group_id: int, *, token: str | None = None
+    ) -> list[User]:
+        return await self._inner.get_members(group_id, token=token)
 
-    async def get_user_groups(self, user_id: int) -> list[Group]:
-        return await self._inner.get_user_groups(user_id)
+    async def get_user_groups(
+        self, user_id: int, *, token: str | None = None
+    ) -> list[Group]:
+        return await self._inner.get_user_groups(user_id, token=token)
 
 
 class Database:

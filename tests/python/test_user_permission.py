@@ -24,7 +24,7 @@ def db_paths():
 
 @pytest.mark.asyncio
 async def test_version_exposed():
-    assert user_permission.__version__ == "0.4.0"
+    assert user_permission.__version__ == "0.5.0"
 
 
 @pytest.mark.asyncio
@@ -168,3 +168,62 @@ def test_asyncio_run_direct_user_create(db_paths):
     user = asyncio.run(db.users.create("alice", "pw", "Alice"))
     assert user.username == "alice"
     asyncio.run(db.close())
+
+
+@pytest.mark.asyncio
+async def test_relay_per_call_token(db_paths):
+    """Relay backend: per-call ``token=`` 引数が内部保持トークンより優先される。
+
+    1 つの ``Database`` (relay) を共有しながら、リクエストごとに異なる
+    ユーザーのトークンを ``token=`` で pass-through する FastAPI 風シナリオ
+    の最小再現。
+    """
+    import asyncio
+
+    db_path, secret = db_paths
+    server_db = Database(db_path, secret=secret)
+    await server_db.connect()
+    # 1 人目は admin、2 人目は一般ユーザー。
+    await server_db.users.create("alice", "pw", "Alice")
+    await server_db.users.create("bob", "pw", "Bob")
+
+    # バックグラウンドで bundled axum server を起動。
+    server_task = asyncio.create_task(
+        user_permission.serve(
+            database=db_path,
+            secret=secret,
+            host="127.0.0.1",
+            port=18745,
+            webui=False,
+        )
+    )
+    await asyncio.sleep(0.5)
+    try:
+        # Relay クライアントを 1 つだけ作る (login() は呼ばない)。
+        relay = Database("http://127.0.0.1:18745")
+        await relay.connect()
+
+        # 各ユーザーのトークンを (admin の) server 経由で発行。
+        alice_token = await server_db.users.authenticate("alice", "pw")
+        bob_token = await server_db.users.authenticate("bob", "pw")
+        assert alice_token and bob_token
+
+        # 共有 relay インスタンスから per-call token で切り替えながら呼ぶ。
+        users_via_alice = await relay.users.list_all(token=alice_token)
+        assert {u.username for u in users_via_alice} == {"alice", "bob"}
+
+        users_via_bob = await relay.users.list_all(token=bob_token)
+        assert {u.username for u in users_via_bob} == {"alice", "bob"}
+
+        # token を渡さなければ内部保持なし → 401 で Relay エラー。
+        with pytest.raises(Exception):
+            await relay.users.list_all()
+
+        await relay.close()
+    finally:
+        server_task.cancel()
+        try:
+            await server_task
+        except (asyncio.CancelledError, BaseException):
+            pass
+        await server_db.close()
