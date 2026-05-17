@@ -1,43 +1,42 @@
-# UserPermission
+# UserPermission (Python bindings)
 
 ![PyPI - License](https://img.shields.io/pypi/l/user-permission?cacheSeconds=0)
 ![PyPI - Version](https://img.shields.io/pypi/v/user-permission?cacheSeconds=0)
 ![Pepy Total Downloads](https://img.shields.io/pepy/dt/user-permission?cacheSeconds=0)
 
-ユーザーとグループを管理するための非同期ライブラリです。
-**v0.4.0 から Rust 実装に移行**し、Python 側は PyO3 + maturin による薄いラッパーになりました。
+ユーザーとグループを管理するための非同期ライブラリ `user-permission` の **Python バインディング** です。
 
-- **Rust コア**: tokio + sqlx(SQLite) + argon2 + jsonwebtoken
-- **Python API**: `async with Database(...)` の使い勝手はそのまま、ネイティブ拡張で高速化
-- **HTTP サーバー**: axum で実装した REST API を `await user_permission.serve(...)` または `user-permission serve` CLI から起動
+Rust 実装本体は別リポジトリに分離されました: **[mokuichi147/user-permission](https://github.com/mokuichi147/user-permission)**
 
-> **v0.3 からの移行**:
-> `create_router` / `create_app` / `create_webui_router` / `create_relay_router` は廃止されました。Python の FastAPI に直接埋め込む代わりに、サーバーが必要な場合は `await user_permission.serve(...)` を呼ぶか、Rust バイナリ (`cargo install user-permission`) を別プロセスで起動してください。
-> `fastapi` / `server` / `webui` / `relay` の optional extras は不要になり、依存も含めて削除されました。
+このリポジトリは PyO3 + maturin による薄いラッパーのみを含み、PyPI パッケージ `user-permission` をビルド・公開します。
 
-> **リポジトリ構成**: 現在は単一リポジトリ (Cargo workspace + maturin) ですが、近日中に Rust クレートを `mokuichi147/user-permission` に分離し、本リポジトリは PyO3 バインディングのみ (`user-permission-py` にリネーム予定) に縮小する計画です。Python パッケージ名 (`user-permission`) と Rust クレート名 (`user-permission`) は据え置きです。
+## クイックスタート (サーバーを試す)
+
+インストール不要で、`uvx` から直接サーバーを起動できます。
+
+```bash
+uvx user-permission serve --webui
+```
+
+ブラウザで <http://127.0.0.1:8000/ui> を開くと Web 管理画面が利用できます。
+オプション一覧は [サーバー起動](#サーバー起動) を参照してください。
 
 ## インストール
 
-### Python
-
 ```bash
-pip install user-permission        # PyPI からビルド済 wheel
-# またはソースから:
-maturin develop                    # 開発用に現在の venv に組み込む
+pip install user-permission
 ```
 
 依存パッケージはありません (Rust 拡張に同梱)。Python 3.9 以降の abi3 wheel を公開しています。
 
-### Rust
+ソースからビルドする場合:
 
 ```bash
-cargo add user-permission-core   # コア (DB / 認証 / JWT) のみ
-cargo add user-permission        # axum ルーターを別アプリに組み込む
-cargo install user-permission    # 単体サーバーとしてインストール
+maturin develop          # 開発用に現在の venv に組み込む
+maturin build --release  # リリース wheel をビルド
 ```
 
-## 使い方 (Python)
+## 使い方
 
 ### 初期化
 
@@ -117,11 +116,6 @@ asyncio.run(serve(host="0.0.0.0", port=8001, prefix="/api", webui=True))
 CLI からも起動できます。
 
 ```bash
-# Python から (pip install user-permission した場合)
-user-permission serve --host 0.0.0.0 --port 8001 --prefix /api --webui
-
-# Rust バイナリ (パフォーマンス重視)
-cargo install user-permission
 user-permission serve --host 0.0.0.0 --port 8001 --prefix /api --webui
 ```
 
@@ -132,10 +126,8 @@ user-permission serve --host 0.0.0.0 --port 8001 --prefix /api --webui
 | `--database` | `user_permission.db` | SQLiteデータベースのパス |
 | `--secret` | `secret.key` | シークレットキーファイルのパス |
 | `--prefix` | (なし) | APIルートプレフィックス（例: `/api`） |
-| `--webui` | 無効 | Web管理画面（HTMX+Tailwind）を有効化 |
+| `--webui` | 無効 | Web管理画面を有効化 |
 | `--webui-prefix` | `/ui` | 管理画面のURLプレフィックス |
-
-> **Web 管理画面の移植状況**: v0.4 系列ではプレースホルダ画面のみ提供しています。HTMX/Tailwind ベースの完全な管理画面は v0.4.x の追加リリースで再実装予定です。当面はREST API か legacy v0.3 を利用してください。
 
 ### リレー（中継）
 
@@ -148,116 +140,21 @@ from user_permission import Database
 db = Database("app.db", secret="secret.key")
 
 # URL → リモートサーバーへ HTTP 中継
-db = Database("http://localhost:8001")
-
 async with Database("http://localhost:8001") as db:
     token = await db.login("alice", "password123")
     users = await db.users.list_all()
-    group = await db.groups.create("admins", "Admin group")
-    await db.groups.add_user(group.id, user.id)
 ```
 
 `db.login(...)` で取得したトークンは Database が内部に保持し、以降のリクエストの `Authorization: Bearer` に自動付与されます。
 
-## 使い方 (Rust)
+## REST API・管理者ロール・スキーマ
 
-コアだけ使う場合 (`user-permission-core`):
-
-```rust
-use std::time::Duration;
-use user_permission_core::Database;
-
-#[tokio::main]
-async fn main() -> user_permission_core::Result<()> {
-    let db = Database::open_local("app.db", Some("secret.key")).await?;
-
-    let alice = db.users().create("alice", "password123", "Alice").await?;
-    let token = db
-        .users()
-        .authenticate("alice", "password123", Duration::from_secs(3600))
-        .await?
-        .expect("credentials");
-    println!("token = {token}");
-
-    let editors = db.groups().create("editors", "Editors", false).await?;
-    db.groups().add_user(editors.id, alice.id).await?;
-
-    Ok(())
-}
-```
-
-axum ルーターを別アプリに組み込む場合 (`user-permission`):
-
-```rust
-use user_permission::{build_app, WebConfig};
-use user_permission_core::Database;
-
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let db = Database::open_local("app.db", Some("secret.key")).await?;
-    let app = build_app(db, WebConfig { api_prefix: "/api".into(), ..Default::default() });
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:8001").await?;
-    axum::serve(listener, app).await?;
-    Ok(())
-}
-```
-
-## REST API
-
-| メソッド | パス | 説明 | 認証 |
-|---|---|---|---|
-| POST | `/token` | ログイン（トークン取得） | 不要 |
-| GET | `/me` | 現在のユーザー情報（`is_admin` を含む） | 必要 |
-| POST | `/users` | ユーザー作成 | 不要 |
-| GET | `/users` | ユーザー一覧 | 必要 |
-| GET | `/users/{id}` | ユーザー取得 | 必要 |
-| PATCH | `/users/{id}` | ユーザー更新 | 本人 or 管理者 |
-| DELETE | `/users/{id}` | ユーザー削除 | 本人 or 管理者 |
-| POST | `/groups` | グループ作成 | 管理者 |
-| GET | `/groups` | グループ一覧 | 必要 |
-| GET | `/groups/{id}` | グループ取得 | 必要 |
-| PATCH | `/groups/{id}` | グループ更新 | 管理者 |
-| DELETE | `/groups/{id}` | グループ削除 | 管理者 |
-| POST | `/groups/{id}/members` | メンバー追加 | 管理者 |
-| DELETE | `/groups/{id}/members/{user_id}` | メンバー削除 | 管理者 |
-| GET | `/groups/{id}/members` | メンバー一覧 | 必要 |
-| GET | `/users/{id}/groups` | 所属グループ一覧 | 必要 |
-
-## 管理者ロール
-
-UserPermission サーバー自身の管理権限は `groups.is_admin = 1` のグループで表現します。
-このフラグが立った **管理者グループ** に所属しているユーザーが「UserPermission 管理者」です。
-
-- 管理者は他ユーザーの編集・削除、グループの作成・更新・削除、メンバー管理が可能
-- 他ユーザーの管理者昇格/降格は、管理者グループへの加入/脱退で行う
-- 管理者グループは複数作れる（運用で分けたい場合）
-- **消費サービス側の「アプリ管理者」などの概念はこの権限とは別**で、通常のグループ（`is_admin = 0`）で自由に表現してください
-
-### 初回セットアップ
-
-最初に作成されたユーザーは **自動的に管理者グループに加入** します。`admin` という名前のグループが無ければ、`is_admin = 1` で新規作成されます。
-
-### 既存DBのマイグレーション
-
-v0.4 起動時には `groups.is_admin` 列の存在を確認し、無ければ `ALTER TABLE` で追加します。既存データは壊しません。
-スキーマ自体は v0.2 以降と互換で、v0.3 で作成された SQLite ファイルはそのまま使えます。
-
-## データベーススキーマ
-
-| テーブル | 説明 |
-|---|---|
-| `users` | ユーザー情報（`username` は UNIQUE） |
-| `groups` | グループ情報（`name` は UNIQUE） |
-| `user_groups` | ユーザーとグループの多対多リレーション（複合PRIMARY KEY） |
-
-ユーザーまたはグループを削除すると、関連する `user_groups` レコードも自動的に削除されます（CASCADE）。
+REST エンドポイント仕様、`groups.is_admin` による管理者ロールの扱い、データベーススキーマは
+[Rust リポジトリの README](https://github.com/mokuichi147/user-permission#readme) を参照してください。
 
 ## 開発
 
 ```bash
-# Rust 単体テスト
-cargo test --workspace
-
 # Python wheel をビルドして現在の venv に組み込む
 maturin develop
 
@@ -268,6 +165,11 @@ pytest tests/python
 # リリース wheel をビルド
 maturin build --release
 ```
+
+## リリース
+
+`pyproject.toml` のバージョンを更新し、`v` で始まる Git タグを push すると GitHub Actions が
+全プラットフォームの wheel をビルドして PyPI に公開します (詳細は `.github/workflows/release.yml`)。
 
 ## ライセンス
 

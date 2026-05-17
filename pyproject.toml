@@ -25,7 +25,7 @@ dependencies = []
 
 [project.urls]
 Repository = "https://github.com/mokuichi147/UserPermission"
-"Rust crate" = "https://github.com/mokuichi147/user-permission"
+"Rust implementation" = "https://github.com/mokuichi147/user-permission"
 
 [project.scripts]
 user-permission = "user_permission.__main__:main"

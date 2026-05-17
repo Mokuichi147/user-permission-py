@@ -15,8 +15,7 @@ name = "_user_permission"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-# Workspace path 依存 — Rust 実装を別リポ `mokuichi147/user-permission` に分離した後は
-# `user-permission-core = "0.4"` / `user-permission = "0.4"` (crates.io version 依存) に差し替える。
+# Rust コアは crates.io から取得 (リポジトリ: mokuichi147/user-permission)
 user-permission-core = { workspace = true }
 user-permission = { workspace = true }
 tokio = { workspace = true }
