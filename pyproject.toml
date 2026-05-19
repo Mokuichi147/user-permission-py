@@ -1,6 +1,6 @@
 [project]
 name = "user-permission"
-version = "0.5.0"
+version = "0.5.1"
 description = "Async user / group / permission management library backed by a Rust core (SQLite, Argon2, JWT, optional HTTP relay)"
 readme = "README.md"
 authors = [

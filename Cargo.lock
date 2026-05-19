@@ -2675,7 +2675,7 @@ dependencies = [
 
 [[package]]
 name = "user-permission-python"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "axum",
  "chrono",

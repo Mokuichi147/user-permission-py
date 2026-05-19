@@ -24,7 +24,7 @@ def db_paths():
 
 @pytest.mark.asyncio
 async def test_version_exposed():
-    assert user_permission.__version__ == "0.5.0"
+    assert user_permission.__version__ == "0.5.1"
 
 
 @pytest.mark.asyncio

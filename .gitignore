@@ -9,6 +9,9 @@ wheels/
 # Virtual environments
 .venv
 
+# Claude Code が生成する worktree
+.claude/worktrees/
+
 # SQLite runtime files
 *.db
 *.db-shm
