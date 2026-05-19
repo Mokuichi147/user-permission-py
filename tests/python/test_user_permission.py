@@ -227,3 +227,39 @@ async def test_relay_per_call_token(db_paths):
         except (asyncio.CancelledError, BaseException):
             pass
         await server_db.close()
+
+
+@pytest.mark.asyncio
+async def test_local_backend_verifies_per_call_token(db_paths):
+    """Local backend: ``token=`` を渡すと JWT が検証される (v0.2.2)。"""
+    db_path, secret = db_paths
+    async with Database(db_path, secret=secret) as db:
+        alice = await db.users.create("alice", "pw", "Alice")
+
+        # 有効な JWT を渡せばアクセスできる。
+        token = await db.users.authenticate("alice", "pw")
+        assert token is not None
+        fetched = await db.users.get_by_id(alice.id, token=token)
+        assert fetched.id == alice.id
+
+        # 不正な JWT はエラーになる。
+        with pytest.raises(Exception):
+            await db.users.get_by_id(alice.id, token="not-a-valid-jwt")
+
+        # token=None は従来どおり通る。
+        assert (await db.users.get_by_id(alice.id)).id == alice.id
+
+
+@pytest.mark.asyncio
+async def test_local_backend_without_secret_rejects_token(db_paths):
+    """secret 未設定の local backend に token を渡すと拒否される (v0.2.2)。"""
+    db_path, _secret = db_paths
+    async with Database(db_path) as db:
+        alice = await db.users.create("alice", "pw", "Alice")
+
+        # TokenManager 未設定なので token を渡すとエラー。
+        with pytest.raises(Exception):
+            await db.users.get_by_id(alice.id, token="anything")
+
+        # None なら従来通り通る。
+        assert (await db.users.get_by_id(alice.id)).id == alice.id
