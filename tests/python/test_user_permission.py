@@ -263,3 +263,55 @@ async def test_local_backend_without_secret_rejects_token(db_paths):
 
         # None なら従来通り通る。
         assert (await db.users.get_by_id(alice.id)).id == alice.id
+
+
+@pytest.mark.asyncio
+async def test_relay_get_by_username(db_paths):
+    """Relay backend: ``get_by_username`` が動作する (v0.2.3)。
+
+    v0.2.2 以前は relay backend では未対応でエラーになっていたが、
+    v0.2.3 で ``/users?username=`` 経由で解決できるようになった。
+    """
+    import asyncio
+
+    db_path, secret = db_paths
+    server_db = Database(db_path, secret=secret)
+    await server_db.connect()
+    alice = await server_db.users.create("alice", "pw", "Alice")
+    await server_db.users.create("bob", "pw", "Bob")
+
+    server_task = asyncio.create_task(
+        user_permission.serve(
+            database=db_path,
+            secret=secret,
+            host="127.0.0.1",
+            port=18746,
+            webui=False,
+        )
+    )
+    await asyncio.sleep(0.5)
+    try:
+        relay = Database("http://127.0.0.1:18746")
+        await relay.connect()
+
+        alice_token = await server_db.users.authenticate("alice", "pw")
+        assert alice_token
+
+        # 既存ユーザーは relay backend 経由で解決できる。
+        found = await relay.users.get_by_username("alice", token=alice_token)
+        assert found is not None
+        assert found.id == alice.id
+        assert found.username == "alice"
+
+        # 存在しないユーザーは None。
+        missing = await relay.users.get_by_username("nobody", token=alice_token)
+        assert missing is None
+
+        await relay.close()
+    finally:
+        server_task.cancel()
+        try:
+            await server_task
+        except (asyncio.CancelledError, BaseException):
+            pass
+        await server_db.close()
