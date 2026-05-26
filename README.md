@@ -147,6 +147,36 @@ async with Database("http://localhost:8001") as db:
 
 `db.login(...)` で取得したトークンは Database が内部に保持し、以降のリクエストの `Authorization: Bearer` に自動付与されます。
 
+### サービスクライアント認証（client-credentials）
+
+サービス間連携向けに、平文パスワードを持たずに**読み取り専用**のスコープ付きトークンを発行できます。
+クライアントには `users:read` / `groups:read` のスコープのみ付与でき、書き込みや管理操作はできません。
+
+```python
+from user_permission import Database, SCOPE_USERS_READ
+
+# 管理側（ローカル）でサービスクライアントを発行。secret は発行時のみ取得可能。
+async with Database("app.db", secret="secret.key") as db:
+    client, secret = await db.service_clients.create("reader", [SCOPE_USERS_READ])
+
+# リレー側はサービストークンでログインし、スコープ内のみ読み取れる。
+async with Database("http://localhost:8001") as relay:
+    await relay.login_client_credentials(client.client_id, secret)
+    users = await relay.users.list_all()  # users:read があるので OK
+```
+
+### バックエンド非依存のユーティリティ
+
+ローカル / リレーのどちらでも同じ呼び出しで動作します。
+
+```python
+# トークンを検証してユーザーを解決（無効・期限切れ・サービストークンは None）
+user = await db.verify_token_and_get_user(token)
+
+# 管理者が不在なら作成して昇格（リレーでは no-op）
+await db.bootstrap_admin_if_needed("admin", "password123")
+```
+
 ## REST API・管理者ロール・スキーマ
 
 REST エンドポイント仕様、`groups.is_admin` による管理者ロールの扱い、データベーススキーマは
