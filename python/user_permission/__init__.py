@@ -19,19 +19,29 @@ from typing import Any
 
 from . import _user_permission as _ext
 from ._user_permission import (
+    ALL_SCOPES,
+    SCOPE_GROUPS_READ,
+    SCOPE_USERS_READ,
     Group,
+    ServiceClient,
     TokenManager,
     User,
     __version__,
     hash_password,
     load_or_create_secret,
+    validate_scopes,
     verify_password,
 )
 
 __all__ = [
+    "ALL_SCOPES",
+    "SCOPE_GROUPS_READ",
+    "SCOPE_USERS_READ",
     "Database",
     "Group",
     "GroupManager",
+    "ServiceClient",
+    "ServiceClientManager",
     "TokenManager",
     "User",
     "UserManager",
@@ -39,6 +49,7 @@ __all__ = [
     "hash_password",
     "load_or_create_secret",
     "serve",
+    "validate_scopes",
     "verify_password",
 ]
 
@@ -188,10 +199,59 @@ class GroupManager:
         return await self._inner.get_user_groups(user_id, token=token)
 
 
+class ServiceClientManager:
+    """Async wrapper around the Rust extension's ``ServiceClientManager``.
+
+    Machine-to-machine service clients are administered against the local
+    backend only; calling these on a relay ``Database`` raises an error.
+    """
+
+    __slots__ = ("_inner",)
+
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+
+    async def create(
+        self,
+        name: str,
+        scopes: list[str],
+        *,
+        expires_at: str | None = None,
+    ) -> tuple[ServiceClient, str]:
+        """Create a client, returning ``(client, secret)``.
+
+        The plaintext ``secret`` is only ever returned here — the database
+        stores an Argon2 hash.
+        """
+        return await self._inner.create(name, list(scopes), expires_at)
+
+    async def list(self) -> list[ServiceClient]:
+        return await self._inner.list()
+
+    async def get_by_client_id(self, client_id: str) -> ServiceClient | None:
+        return await self._inner.get_by_client_id(client_id)
+
+    async def delete(self, id: int) -> bool:
+        return await self._inner.delete(id)
+
+    async def rotate_secret(self, id: int) -> str | None:
+        return await self._inner.rotate_secret(id)
+
+    async def authenticate(
+        self,
+        client_id: str,
+        secret: str,
+        expires_delta: timedelta | None = None,
+    ) -> str | None:
+        return await self._inner.authenticate(
+            client_id, secret, expires_delta=expires_delta
+        )
+
+
 class Database:
     """Async user / group database with local SQLite or HTTP relay backend."""
 
-    __slots__ = ("_inner", "_users", "_groups")
+    __slots__ = ("_inner", "_users", "_groups", "_service_clients")
 
     def __init__(
         self,
@@ -202,6 +262,7 @@ class Database:
         self._inner = _ext.Database(backend, secret=secret)
         self._users = UserManager(self._inner.users)
         self._groups = GroupManager(self._inner.groups)
+        self._service_clients = ServiceClientManager(self._inner.service_clients)
 
     async def connect(self) -> None:
         await self._inner.connect()
@@ -219,6 +280,27 @@ class Database:
     async def login(self, username: str, password: str) -> str:
         return await self._inner.login(username, password)
 
+    async def login_client_credentials(
+        self, client_id: str, client_secret: str
+    ) -> str:
+        return await self._inner.login_client_credentials(client_id, client_secret)
+
+    async def verify_token_and_get_user(self, token: str) -> User | None:
+        return await self._inner.verify_token_and_get_user(token)
+
+    async def bootstrap_admin_if_needed(
+        self, username: str, password: str, display_name: str = ""
+    ) -> User | None:
+        return await self._inner.bootstrap_admin_if_needed(
+            username, password, display_name
+        )
+
+    def is_local(self) -> bool:
+        return self._inner.is_local()
+
+    def is_relay(self) -> bool:
+        return self._inner.is_relay()
+
     @property
     def users(self) -> UserManager:
         return self._users
@@ -226,6 +308,10 @@ class Database:
     @property
     def groups(self) -> GroupManager:
         return self._groups
+
+    @property
+    def service_clients(self) -> ServiceClientManager:
+        return self._service_clients
 
     @property
     def token_manager(self) -> TokenManager:

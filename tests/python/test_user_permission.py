@@ -266,6 +266,172 @@ async def test_local_backend_without_secret_rejects_token(db_paths):
 
 
 @pytest.mark.asyncio
+async def test_bootstrap_admin_if_needed(db_paths):
+    """local backend: 管理者不在なら作成・昇格し、存在すれば no-op (v0.2.5)。"""
+    db_path, secret = db_paths
+    async with Database(db_path, secret=secret) as db:
+        # 管理者がいないので作成され、昇格されて返る。
+        admin = await db.bootstrap_admin_if_needed("admin", "pw", "Admin")
+        assert admin is not None
+        assert admin.username == "admin"
+        assert await db.users.is_admin(admin.id) is True
+
+        # すでに管理者がいるので 2 回目は no-op (None)。
+        assert await db.bootstrap_admin_if_needed("admin2", "pw") is None
+        assert await db.users.get_by_username("admin2") is None
+
+
+@pytest.mark.asyncio
+async def test_verify_token_and_get_user_local(db_paths):
+    """local backend: トークンを検証してユーザーを解決する (v0.2.5)。"""
+    db_path, secret = db_paths
+    async with Database(db_path, secret=secret) as db:
+        alice = await db.users.create("alice", "pw", "Alice")
+        token = await db.users.authenticate("alice", "pw")
+        assert token is not None
+
+        resolved = await db.verify_token_and_get_user(token)
+        assert resolved is not None
+        assert resolved.id == alice.id
+
+        # 無効なトークンは None。
+        assert await db.verify_token_and_get_user("not-a-jwt") is None
+
+
+@pytest.mark.asyncio
+async def test_service_client_lifecycle(db_paths):
+    """local backend: サービスクライアントの発行・認証・失効 (v0.2.4)。"""
+    db_path, secret = db_paths
+    async with Database(db_path, secret=secret) as db:
+        await db.users.create("alice", "pw", "Alice")  # admin
+
+        client, plaintext = await db.service_clients.create(
+            "reader", [user_permission.SCOPE_USERS_READ]
+        )
+        assert client.scopes == [user_permission.SCOPE_USERS_READ]
+        assert client.is_active is True
+        assert plaintext.startswith("ups_")
+
+        # 一覧・client_id 解決。
+        assert [c.client_id for c in await db.service_clients.list()] == [
+            client.client_id
+        ]
+        fetched = await db.service_clients.get_by_client_id(client.client_id)
+        assert fetched is not None and fetched.id == client.id
+
+        # 正しい secret でスコープ付きサービストークンを取得できる。
+        token = await db.service_clients.authenticate(client.client_id, plaintext)
+        assert token is not None
+        claims = db.token_manager.verify_token(token)
+        assert claims["kind"] == "service"
+        assert claims["scope"] == user_permission.SCOPE_USERS_READ
+        # サービストークンはユーザーに解決できない。
+        assert await db.verify_token_and_get_user(token) is None
+
+        # 誤った secret は None。
+        assert (
+            await db.service_clients.authenticate(client.client_id, "ups_wrong")
+            is None
+        )
+
+        # rotate 後は旧 secret が無効、新 secret が有効。
+        new_secret = await db.service_clients.rotate_secret(client.id)
+        assert new_secret is not None and new_secret != plaintext
+        assert (
+            await db.service_clients.authenticate(client.client_id, plaintext) is None
+        )
+        assert (
+            await db.service_clients.authenticate(client.client_id, new_secret)
+            is not None
+        )
+
+        # 削除後は認証不可。
+        assert await db.service_clients.delete(client.id) is True
+        assert (
+            await db.service_clients.authenticate(client.client_id, new_secret)
+            is None
+        )
+
+
+@pytest.mark.asyncio
+async def test_unknown_scope_rejected(db_paths):
+    """未知スコープは create でも validate_scopes でも拒否される (v0.2.4)。"""
+    db_path, secret = db_paths
+    user_permission.validate_scopes([user_permission.SCOPE_USERS_READ])
+    with pytest.raises(Exception):
+        user_permission.validate_scopes(["users:write"])
+
+    async with Database(db_path, secret=secret) as db:
+        await db.users.create("alice", "pw", "Alice")
+        with pytest.raises(Exception):
+            await db.service_clients.create("bad", ["users:write"])
+
+
+@pytest.mark.asyncio
+async def test_create_service_token():
+    """TokenManager.create_service_token がスコープ付き JWT を発行する (v0.2.4)。"""
+    tm = user_permission.TokenManager("test-secret")
+    token = tm.create_service_token(
+        "svc_abc",
+        [user_permission.SCOPE_USERS_READ, user_permission.SCOPE_GROUPS_READ],
+    )
+    claims = tm.verify_token(token)
+    assert claims["sub"] == "service:svc_abc"
+    assert claims["kind"] == "service"
+    assert claims["scope"] == "users:read groups:read"
+    assert "is_admin" not in claims
+
+
+@pytest.mark.asyncio
+async def test_relay_client_credentials(db_paths):
+    """relay backend: client-credentials でログインしスコープ内のみ読める (v0.2.4)。"""
+    import asyncio
+
+    db_path, secret = db_paths
+    server_db = Database(db_path, secret=secret)
+    await server_db.connect()
+    await server_db.users.create("alice", "pw", "Alice")  # admin
+    client, plaintext = await server_db.service_clients.create(
+        "reader", [user_permission.SCOPE_USERS_READ]
+    )
+
+    server_task = asyncio.create_task(
+        user_permission.serve(
+            database=db_path,
+            secret=secret,
+            host="127.0.0.1",
+            port=18747,
+            webui=False,
+        )
+    )
+    await asyncio.sleep(0.5)
+    try:
+        relay = Database("http://127.0.0.1:18747")
+        await relay.connect()
+
+        # client-credentials でログイン (内部にサービストークンを保持)。
+        token = await relay.login_client_credentials(client.client_id, plaintext)
+        assert token
+
+        # users:read スコープがあるので /users は読める。
+        users = await relay.users.list_all()
+        assert {u.username for u in users} == {"alice"}
+
+        # groups:read は付与していないので 403 で失敗する。
+        with pytest.raises(Exception):
+            await relay.groups.list_all()
+
+        await relay.close()
+    finally:
+        server_task.cancel()
+        try:
+            await server_task
+        except (asyncio.CancelledError, BaseException):
+            pass
+        await server_db.close()
+
+
+@pytest.mark.asyncio
 async def test_relay_get_by_username(db_paths):
     """Relay backend: ``get_by_username`` が動作する (v0.2.3)。
 

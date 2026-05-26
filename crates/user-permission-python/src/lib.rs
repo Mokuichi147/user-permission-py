@@ -10,6 +10,7 @@ mod error;
 mod group;
 mod password;
 mod server;
+mod service_client;
 mod token;
 mod user;
 
@@ -24,12 +25,18 @@ fn _user_permission(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<group::PyGroup>()?;
     m.add_class::<group::PyGroupManager>()?;
     m.add_class::<token::PyTokenManager>()?;
+    m.add_class::<service_client::PyServiceClient>()?;
+    m.add_class::<service_client::PyServiceClientManager>()?;
 
     m.add_function(wrap_pyfunction!(password::hash_password, m)?)?;
     m.add_function(wrap_pyfunction!(password::verify_password, m)?)?;
     m.add_function(wrap_pyfunction!(password::load_or_create_secret, m)?)?;
+    m.add_function(wrap_pyfunction!(service_client::validate_scopes, m)?)?;
     m.add_function(wrap_pyfunction!(server::serve, m)?)?;
 
+    m.add("SCOPE_USERS_READ", user_permission_core::SCOPE_USERS_READ)?;
+    m.add("SCOPE_GROUPS_READ", user_permission_core::SCOPE_GROUPS_READ)?;
+    m.add("ALL_SCOPES", user_permission_core::ALL_SCOPES.to_vec())?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
 
     Ok(())

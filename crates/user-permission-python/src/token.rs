@@ -114,4 +114,20 @@ impl PyTokenManager {
         let claims = self.inner.verify_token(token).map_err(map_core_err)?;
         json_to_pyobject(py, &Value::Object(claims))
     }
+
+    #[pyo3(signature = (client_id, scopes, expires_delta=None))]
+    fn create_service_token(
+        &self,
+        client_id: &str,
+        scopes: Vec<String>,
+        expires_delta: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<String> {
+        let duration = match expires_delta {
+            Some(d) => pydelta_to_duration(d)?,
+            None => Duration::from_secs(3600),
+        };
+        self.inner
+            .create_service_token(client_id, &scopes, duration)
+            .map_err(map_core_err)
+    }
 }
