@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use user_permission_core::{User, UserUpdate};
@@ -60,20 +58,6 @@ fn get_db(db: &SharedDb) -> PyResult<user_permission_core::Database> {
         .ok_or_else(|| {
             PyRuntimeError::new_err("Database is not connected. Call connect() first.")
         })
-}
-
-fn pydelta_to_duration(delta: Option<&Bound<'_, PyAny>>) -> PyResult<Duration> {
-    match delta {
-        Some(d) => {
-            let total_seconds: f64 = d.call_method0("total_seconds")?.extract()?;
-            if total_seconds <= 0.0 {
-                Ok(Duration::from_secs(0))
-            } else {
-                Ok(Duration::from_secs_f64(total_seconds))
-            }
-        }
-        None => Ok(Duration::from_secs(3600)),
-    }
 }
 
 #[pymethods]
@@ -253,28 +237,4 @@ impl PyUserManager {
         })
     }
 
-    #[pyo3(signature = (username, password, expires_delta=None))]
-    fn authenticate<'py>(
-        &self,
-        py: Python<'py>,
-        username: String,
-        password: String,
-        expires_delta: Option<&Bound<'_, PyAny>>,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let db = get_db(&self.db)?;
-        let duration = pydelta_to_duration(expires_delta)?;
-        pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let token = db
-                .users()
-                .authenticate(&username, &password, duration)
-                .await
-                .map_err(map_core_err)?;
-            Python::with_gil(|py| {
-                Ok(match token {
-                    Some(t) => t.into_py(py),
-                    None => py.None(),
-                })
-            })
-        })
-    }
 }

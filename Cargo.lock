@@ -2631,9 +2631,9 @@ dependencies = [
 
 [[package]]
 name = "user-permission"
-version = "0.2.5"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "74ddc4fbcf230d16cec0f28b68e09416c940881eb591195fd5587909726d4985"
+checksum = "d1893d2af4ca9b9020bfd198aea461ea88ab37b962f9f8138317743e0bf1039d"
 dependencies = [
  "anyhow",
  "askama",
@@ -2654,9 +2654,9 @@ dependencies = [
 
 [[package]]
 name = "user-permission-core"
-version = "0.2.5"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9708470b7390ac3cc0e6f675c2939b0ec0978298fd24f73271420e26bb0e337e"
+checksum = "b66320cabc7d1009e9f7025388241ea4259d15b0ecaef98fd429d2e23efaa774"
 dependencies = [
  "argon2",
  "async-trait",
