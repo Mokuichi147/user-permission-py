@@ -269,7 +269,7 @@ class Database:
             client_id, client_secret, expires_delta=expires_delta
         )
 
-    async def verify_token_and_get_user(self, token: str) -> User | None:
+    async def verify_token_and_get_user(self, token: str | None) -> User | None:
         return await self._inner.verify_token_and_get_user(token)
 
     async def bootstrap_admin_if_needed(

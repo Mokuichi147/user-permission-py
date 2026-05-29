@@ -265,6 +265,9 @@ async def test_verify_token_and_get_user_local(db_paths):
         # 無効なトークンは None。
         assert await db.verify_token_and_get_user("not-a-jwt") is None
 
+        # None を渡しても例外にならず None（login 失敗をそのまま渡せる）。
+        assert await db.verify_token_and_get_user(None) is None
+
 
 @pytest.mark.asyncio
 async def test_service_client_lifecycle(db_paths):

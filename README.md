@@ -153,9 +153,8 @@ async with Database("http://localhost:8001") as db:
 ```python
 # どちらの backend でも同じコードが動く
 async def authenticate(db: Database, username: str, password: str):
+    # login 失敗時は None、verify_token_and_get_user は None を渡すと None を返す
     token = await db.login(username, password)
-    if token is None:
-        return None
     return await db.verify_token_and_get_user(token)
 ```
 

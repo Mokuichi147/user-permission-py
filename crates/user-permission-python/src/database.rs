@@ -189,13 +189,17 @@ impl PyDatabase {
         })
     }
 
+    #[pyo3(signature = (token))]
     fn verify_token_and_get_user<'py>(
         &self,
         py: Python<'py>,
-        token: String,
+        token: Option<String>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let inner = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let Some(token) = token else {
+                return Python::with_gil(|py| Ok(py.None()));
+            };
             let db = lock_db(&inner)?;
             let user = db
                 .verify_token_and_get_user(&token)
