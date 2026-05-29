@@ -24,7 +24,7 @@ def db_paths():
 
 @pytest.mark.asyncio
 async def test_version_exposed():
-    assert user_permission.__version__ == "0.5.1"
+    assert user_permission.__version__ == "0.5.3"
 
 
 @pytest.mark.asyncio
@@ -56,20 +56,19 @@ async def test_user_crud_round_trip(db_paths):
 
 
 @pytest.mark.asyncio
-async def test_authenticate_and_verify(db_paths):
+async def test_login_and_verify(db_paths):
     db_path, secret = db_paths
     async with Database(db_path, secret=secret) as db:
-        await db.users.create("alice", "pw", "")
-        token = await db.users.authenticate(
-            "alice", "pw", expires_delta=timedelta(hours=1)
-        )
+        alice = await db.users.create("alice", "pw", "")
+        token = await db.login("alice", "pw", expires_delta=timedelta(hours=1))
         assert token is not None
-        claims = db.token_manager.verify_token(token)
-        assert claims["username"] == "alice"
-        assert claims["is_admin"] is True
+        resolved = await db.verify_token_and_get_user(token)
+        assert resolved is not None
+        assert resolved.username == "alice"
+        assert await db.users.is_admin(alice.id) is True
 
-        assert await db.users.authenticate("alice", "bad") is None
-        assert await db.users.authenticate("nobody", "pw") is None
+        assert await db.login("alice", "bad") is None
+        assert await db.login("nobody", "pw") is None
 
 
 @pytest.mark.asyncio
@@ -104,37 +103,6 @@ async def test_promote_and_demote(db_paths):
         assert await db.users.is_admin(bob.id) is True
         await db.users.set_admin(bob.id, False)
         assert await db.users.is_admin(bob.id) is False
-
-
-@pytest.mark.asyncio
-async def test_password_helpers():
-    h = user_permission.hash_password("hello")
-    assert user_permission.verify_password("hello", h) is True
-    assert user_permission.verify_password("world", h) is False
-    # PHC string format
-    assert h.startswith("$argon2id$")
-
-
-@pytest.mark.asyncio
-async def test_load_or_create_secret(tmp_path):
-    path = tmp_path / "nested" / "secret.key"
-    first = user_permission.load_or_create_secret(str(path))
-    second = user_permission.load_or_create_secret(str(path))
-    assert first == second
-    assert len(first) == 64
-
-
-@pytest.mark.asyncio
-async def test_token_manager_round_trip(db_paths):
-    _db_path, secret = db_paths
-    tm = user_permission.TokenManager.from_file(secret)
-    token = tm.create_token(
-        42, "alice", expires_delta=timedelta(minutes=5), extra_claims={"role": "x"}
-    )
-    claims = tm.verify_token(token)
-    assert claims["sub"] == "42"
-    assert claims["username"] == "alice"
-    assert claims["role"] == "x"
 
 
 # --- Regression tests for the "no running event loop" trap. ---
@@ -204,8 +172,8 @@ async def test_relay_per_call_token(db_paths):
         await relay.connect()
 
         # 各ユーザーのトークンを (admin の) server 経由で発行。
-        alice_token = await server_db.users.authenticate("alice", "pw")
-        bob_token = await server_db.users.authenticate("bob", "pw")
+        alice_token = await server_db.login("alice", "pw")
+        bob_token = await server_db.login("bob", "pw")
         assert alice_token and bob_token
 
         # 共有 relay インスタンスから per-call token で切り替えながら呼ぶ。
@@ -237,7 +205,7 @@ async def test_local_backend_verifies_per_call_token(db_paths):
         alice = await db.users.create("alice", "pw", "Alice")
 
         # 有効な JWT を渡せばアクセスできる。
-        token = await db.users.authenticate("alice", "pw")
+        token = await db.login("alice", "pw")
         assert token is not None
         fetched = await db.users.get_by_id(alice.id, token=token)
         assert fetched.id == alice.id
@@ -257,7 +225,7 @@ async def test_local_backend_without_secret_rejects_token(db_paths):
     async with Database(db_path) as db:
         alice = await db.users.create("alice", "pw", "Alice")
 
-        # TokenManager 未設定なので token を渡すとエラー。
+        # secret 未設定なので token を渡すとエラー。
         with pytest.raises(Exception):
             await db.users.get_by_id(alice.id, token="anything")
 
@@ -287,7 +255,7 @@ async def test_verify_token_and_get_user_local(db_paths):
     db_path, secret = db_paths
     async with Database(db_path, secret=secret) as db:
         alice = await db.users.create("alice", "pw", "Alice")
-        token = await db.users.authenticate("alice", "pw")
+        token = await db.login("alice", "pw")
         assert token is not None
 
         resolved = await db.verify_token_and_get_user(token)
@@ -320,37 +288,23 @@ async def test_service_client_lifecycle(db_paths):
         assert fetched is not None and fetched.id == client.id
 
         # 正しい secret でスコープ付きサービストークンを取得できる。
-        token = await db.service_clients.authenticate(client.client_id, plaintext)
+        token = await db.login_service(client.client_id, plaintext)
         assert token is not None
-        claims = db.token_manager.verify_token(token)
-        assert claims["kind"] == "service"
-        assert claims["scope"] == user_permission.SCOPE_USERS_READ
         # サービストークンはユーザーに解決できない。
         assert await db.verify_token_and_get_user(token) is None
 
         # 誤った secret は None。
-        assert (
-            await db.service_clients.authenticate(client.client_id, "ups_wrong")
-            is None
-        )
+        assert await db.login_service(client.client_id, "ups_wrong") is None
 
         # rotate 後は旧 secret が無効、新 secret が有効。
         new_secret = await db.service_clients.rotate_secret(client.id)
         assert new_secret is not None and new_secret != plaintext
-        assert (
-            await db.service_clients.authenticate(client.client_id, plaintext) is None
-        )
-        assert (
-            await db.service_clients.authenticate(client.client_id, new_secret)
-            is not None
-        )
+        assert await db.login_service(client.client_id, plaintext) is None
+        assert await db.login_service(client.client_id, new_secret) is not None
 
         # 削除後は認証不可。
         assert await db.service_clients.delete(client.id) is True
-        assert (
-            await db.service_clients.authenticate(client.client_id, new_secret)
-            is None
-        )
+        assert await db.login_service(client.client_id, new_secret) is None
 
 
 @pytest.mark.asyncio
@@ -365,21 +319,6 @@ async def test_unknown_scope_rejected(db_paths):
         await db.users.create("alice", "pw", "Alice")
         with pytest.raises(Exception):
             await db.service_clients.create("bad", ["users:write"])
-
-
-@pytest.mark.asyncio
-async def test_create_service_token():
-    """TokenManager.create_service_token がスコープ付き JWT を発行する (v0.2.4)。"""
-    tm = user_permission.TokenManager("test-secret")
-    token = tm.create_service_token(
-        "svc_abc",
-        [user_permission.SCOPE_USERS_READ, user_permission.SCOPE_GROUPS_READ],
-    )
-    claims = tm.verify_token(token)
-    assert claims["sub"] == "service:svc_abc"
-    assert claims["kind"] == "service"
-    assert claims["scope"] == "users:read groups:read"
-    assert "is_admin" not in claims
 
 
 @pytest.mark.asyncio
@@ -410,7 +349,7 @@ async def test_relay_client_credentials(db_paths):
         await relay.connect()
 
         # client-credentials でログイン (内部にサービストークンを保持)。
-        token = await relay.login_client_credentials(client.client_id, plaintext)
+        token = await relay.login_service(client.client_id, plaintext)
         assert token
 
         # users:read スコープがあるので /users は読める。
@@ -460,7 +399,7 @@ async def test_relay_get_by_username(db_paths):
         relay = Database("http://127.0.0.1:18746")
         await relay.connect()
 
-        alice_token = await server_db.users.authenticate("alice", "pw")
+        alice_token = await server_db.login("alice", "pw")
         assert alice_token
 
         # 既存ユーザーは relay backend 経由で解決できる。

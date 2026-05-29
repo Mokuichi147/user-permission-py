@@ -32,8 +32,8 @@ pip install user-permission
 ソースからビルドする場合:
 
 ```bash
-maturin develop          # 開発用に現在の venv に組み込む
-maturin build --release  # リリース wheel をビルド
+uv run maturin develop          # 開発用に現在の venv に組み込む
+uv run maturin build --release  # リリース wheel をビルド
 ```
 
 ## 使い方
@@ -72,15 +72,16 @@ await db.users.delete(user.id)
 ```python
 from datetime import timedelta
 
-token = await db.users.authenticate("alice", "password123")
-token = await db.users.authenticate(
+token = await db.login("alice", "password123")
+token = await db.login(
     "alice", "password123", expires_delta=timedelta(hours=24)
 )
 
-payload = db.token_manager.verify_token(token)
-print(payload["sub"])        # ユーザーID（文字列）
-print(payload["username"])   # ユーザー名
-print(payload["is_admin"])   # bool
+# トークンを検証してユーザーを解決（無効・期限切れは None）
+user = await db.verify_token_and_get_user(token)
+print(user.id)          # ユーザーID
+print(user.username)    # ユーザー名
+print(await db.users.is_admin(user.id))  # bool
 ```
 
 ### グループ管理
@@ -147,6 +148,19 @@ async with Database("http://localhost:8001") as db:
 
 `db.login(...)` で取得したトークンは Database が内部に保持し、以降のリクエストの `Authorization: Bearer` に自動付与されます。
 
+**推奨: backend を意識しない実装。** 認証（`db.login` / `db.login_service`）、トークン検証（`db.verify_token_and_get_user`）、ユーザー・グループ操作はすべてローカル / リレーで同一の呼び出しで動作します。接続先 URL（またはファイルパス）を切り替えるだけで、アプリ側のコードを変えずにローカル運用と中央サーバー運用を行き来できます。
+
+```python
+# どちらの backend でも同じコードが動く
+async def authenticate(db: Database, username: str, password: str):
+    token = await db.login(username, password)
+    if token is None:
+        return None
+    return await db.verify_token_and_get_user(token)
+```
+
+> サービスクライアントの**管理操作**だけは例外でローカル専用です（後述）。
+
 ### サービスクライアント認証（client-credentials）
 
 サービス間連携向けに、平文パスワードを持たずに**読み取り専用**のスコープ付きトークンを発行できます。
@@ -161,9 +175,11 @@ async with Database("app.db", secret="secret.key") as db:
 
 # リレー側はサービストークンでログインし、スコープ内のみ読み取れる。
 async with Database("http://localhost:8001") as relay:
-    await relay.login_client_credentials(client.client_id, secret)
+    await relay.login_service(client.client_id, secret)
     users = await relay.users.list_all()  # users:read があるので OK
 ```
+
+> **注意: 管理操作はローカル backend 専用です。** `service_clients.create` / `list` / `get_by_client_id` / `delete` / `rotate_secret` はリレー（URL）backend で呼ぶとエラーになります（サービスクライアントの発行・管理は中央サーバー側で行う設計のため）。一方、サービス認証（`db.login_service(...)`）はローカル / リレーのどちらでも動作します。
 
 ### バックエンド非依存のユーティリティ
 
@@ -186,14 +202,13 @@ REST エンドポイント仕様、`groups.is_admin` による管理者ロール
 
 ```bash
 # Python wheel をビルドして現在の venv に組み込む
-maturin develop
+uv run maturin develop
 
 # Python 統合テスト
-pip install pytest pytest-asyncio
-pytest tests/python
+uv run --with pytest --with pytest-asyncio pytest tests/python
 
 # リリース wheel をビルド
-maturin build --release
+uv run maturin build --release
 ```
 
 ## リリース

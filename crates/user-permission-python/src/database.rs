@@ -4,10 +4,11 @@ use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use user_permission_core::Database;
 
+use std::time::Duration;
+
 use crate::error::map_core_err;
 use crate::group::PyGroupManager;
 use crate::service_client::PyServiceClientManager;
-use crate::token::PyTokenManager;
 use crate::user::{PyUser, PyUserManager};
 
 pub(crate) type SharedDb = Arc<Mutex<Option<Database>>>;
@@ -19,12 +20,6 @@ pub struct PyDatabase {
     pub(crate) inner: SharedDb,
 }
 
-impl PyDatabase {
-    pub(crate) fn get_db(&self) -> PyResult<Database> {
-        lock_db(&self.inner)
-    }
-}
-
 fn lock_db(inner: &SharedDb) -> PyResult<Database> {
     inner
         .lock()
@@ -34,6 +29,20 @@ fn lock_db(inner: &SharedDb) -> PyResult<Database> {
         .ok_or_else(|| {
             PyRuntimeError::new_err("Database is not connected. Call connect() first.")
         })
+}
+
+fn pydelta_to_duration(delta: Option<&Bound<'_, PyAny>>) -> PyResult<Duration> {
+    match delta {
+        Some(d) => {
+            let total_seconds: f64 = d.call_method0("total_seconds")?.extract()?;
+            if total_seconds <= 0.0 {
+                Ok(Duration::from_secs(0))
+            } else {
+                Ok(Duration::from_secs_f64(total_seconds))
+            }
+        }
+        None => Ok(Duration::from_secs(3600)),
+    }
 }
 
 fn extract_str(value: &Bound<'_, PyAny>) -> PyResult<String> {
@@ -130,48 +139,53 @@ impl PyDatabase {
         PyServiceClientManager::new(self.inner.clone())
     }
 
-    #[getter]
-    fn token_manager(&self) -> PyResult<PyTokenManager> {
-        let db = self.get_db()?;
-        let tm = db.token_manager().map_err(map_core_err)?.clone();
-        Ok(PyTokenManager::from_inner(tm))
-    }
-
-    fn is_local(&self) -> PyResult<bool> {
-        Ok(self.get_db()?.is_local())
-    }
-
-    fn is_relay(&self) -> PyResult<bool> {
-        Ok(self.get_db()?.is_relay())
-    }
-
+    #[pyo3(signature = (username, password, expires_delta=None))]
     fn login<'py>(
         &self,
         py: Python<'py>,
         username: String,
         password: String,
+        expires_delta: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let inner = self.inner.clone();
+        let duration = pydelta_to_duration(expires_delta)?;
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let db = lock_db(&inner)?;
-            db.login(&username, &password)
+            let token = db
+                .login(&username, &password, duration)
                 .await
-                .map_err(map_core_err)
+                .map_err(map_core_err)?;
+            Python::with_gil(|py| {
+                Ok(match token {
+                    Some(t) => t.into_py(py),
+                    None => py.None(),
+                })
+            })
         })
     }
 
-    fn login_client_credentials<'py>(
+    #[pyo3(signature = (client_id, client_secret, expires_delta=None))]
+    fn login_service<'py>(
         &self,
         py: Python<'py>,
         client_id: String,
         client_secret: String,
+        expires_delta: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let inner = self.inner.clone();
+        let duration = pydelta_to_duration(expires_delta)?;
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let db = lock_db(&inner)?;
-            db.login_client_credentials(&client_id, &client_secret)
+            let token = db
+                .login_service(&client_id, &client_secret, duration)
                 .await
-                .map_err(map_core_err)
+                .map_err(map_core_err)?;
+            Python::with_gil(|py| {
+                Ok(match token {
+                    Some(t) => t.into_py(py),
+                    None => py.None(),
+                })
+            })
         })
     }
 
